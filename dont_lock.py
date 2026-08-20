@@ -266,7 +266,7 @@ def print_banner(args: argparse.Namespace) -> None:
     print(bar)
 
 
-def show_status(args, started, next_at, wiggles) -> None:
+def show_status(args, started, next_at, wiggles, total_px) -> None:
     if sys.stdout is None:
         return
     elapsed = fmt_duration(time.monotonic() - started)
@@ -275,8 +275,13 @@ def show_status(args, started, next_at, wiggles) -> None:
     else:
         remain = max(0, math.ceil(next_at - time.monotonic()))
         detail = f"下次微移 {remain}s 后"
-    line = f"已运行 {elapsed} | 微移 {wiggles} 次 | {detail} | Ctrl+C 退出"
-    sys.stdout.write("\r" + line.ljust(72))
+    line = (
+        f"已运行 {elapsed} | 微移 {wiggles} 次 | 累计位移 {total_px}px"
+        f" | {detail} | Ctrl+C 退出"
+    )
+    # 中文按显示宽度折半算，保守补足空白以免残留旧字符
+    width = sum(2 if ord(ch) > 0x2E80 else 1 for ch in line)
+    sys.stdout.write("\r" + line + " " * max(0, 96 - width))
     sys.stdout.flush()
 
 
@@ -293,6 +298,7 @@ def run(args: argparse.Namespace) -> int:
     started = time.monotonic()
     next_at = started + args.interval
     wiggles = 0
+    total_px = 0
     try:
         if not args.quiet:
             print_banner(args)
@@ -309,10 +315,8 @@ def run(args: argparse.Namespace) -> int:
                     warn(f"\n[警告] 注入鼠标输入失败：{exc}")
                     moved = 0
                 wiggles += 1
+                total_px += moved
                 next_at = now + args.interval
-                if not args.quiet:
-                    stamp = time.strftime("%H:%M:%S")
-                    print(f"\r[{stamp}] 第 {wiggles} 次微移鼠标（{moved}px）" + " " * 8)
             # 每秒醒一次：刷新状态、响应停止信号
             if stop_event:
                 if kernel32.WaitForSingleObject(stop_event, 1000) == WAIT_OBJECT_0:
@@ -321,7 +325,7 @@ def run(args: argparse.Namespace) -> int:
             else:
                 time.sleep(1.0)
             if not args.quiet:
-                show_status(args, started, next_at, wiggles)
+                show_status(args, started, next_at, wiggles, total_px)
     except KeyboardInterrupt:
         log("\n已停止，鼠标恢复正常，再见。")
         return 0
